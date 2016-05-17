@@ -4,9 +4,9 @@ import sys
 import itertools
 import random
 import numpy as np
+import os
 
 def create_word_mapping_file(src_train_file,tgt_train_file,mapping_name,count_cutoff):
-	print 5
 	print "source file name used for creating mapping file:",src_train_file
 	print "target file name used for creating mapping file:",tgt_train_file	
 	src_train_file = codecs.open(src_train_file,'r','utf-8')
@@ -58,12 +58,12 @@ class minibatcher:
 		self.load_data(data_file_name,val_file_name)
 		#now set the checkpoints for getting val score
 		self.val_checkpoints = []
+		self.current_epoch = 1
 		tmp_val = 0.0
 		while tmp_val <1:
 			self.val_checkpoints.append(int(tmp_val*self.data.shape[0]))
 			tmp_val+=val_check_rate
-		print "Number of times per epoch the validation set will be evaluated:",len(self.val_checkpoints)	
-		
+		print "Number of times per epoch the validation set will be evaluated:",len(self.val_checkpoints)			
 	def load_mapping(self,mapping_file):
 		source = True
 		self.src_mapping = {}
@@ -74,9 +74,11 @@ class minibatcher:
 				continue
 			line = line.replace('\n','').split('\t')
 			if source:
-				self.src_mapping[line[1]] = line[0]
+				self.src_mapping[line[1]] = int(line[0])
 			else:
-				self.tgt_mapping[line[1]] = line[0]
+				self.tgt_mapping[line[1]] = int(line[0])
+		self.source_vocab_size = len(self.src_mapping)
+		self.target_vocab_size = len(self.tgt_mapping)
 		print "Source mapping size:",len(self.src_mapping)
 		print "Target mapping size:",len(self.tgt_mapping)
 	def load_data(self,data_file_name,val_file_name):
@@ -135,7 +137,8 @@ class minibatcher:
 			score_val = True	
 		if self.current_index + self.minibatch_size > self.data.shape[0]:
 			#Now we need to wrap around the training set
-			print "Epoch just finished"
+			print '-'*10,"Epoch",self.current_epoch,"just finished",'-'*10
+			self.current_epoch+=1
 			bottom_data = self.data[self.current_index:,:]
 			self.current_index = self.minibatch_size - (self.data.shape[0] - self.current_index)
 			top_data = self.data[:self.current_index]
@@ -167,12 +170,12 @@ class minibatcher:
 		yield self.val_data[(num_steps-1)*self.val_stride:]
 		
 	
-#Now begins the testing
-#np.random.seed(seed=1)
-##create_word_mapping_file(sys.argv[1],sys.argv[2],'mapping.nn',3)
-#mybatcher = minibatcher('mapping.nn','training.data.11+4.small','validation.data.11+4',11,4,20,0.5)
+##Now begins the testing
+##np.random.seed(seed=1)
+###create_word_mapping_file(sys.argv[1],sys.argv[2],'mapping.nn',3)
+##mybatcher = minibatcher('mapping.nn','training.data.11+4.small','validation.data.11+4',11,4,20,0.5)
+##
+##print "Minibatches per epoch:",mybatcher.minibatches_per_epoch()
+##for batch in mybatcher.get_val_data_gen():
+##	print batch.shape
 #
-#print "Minibatches per epoch:",mybatcher.minibatches_per_epoch()
-#for batch in mybatcher.get_val_data_gen():
-#	print batch.shape
-
