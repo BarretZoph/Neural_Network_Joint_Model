@@ -5,6 +5,7 @@ import itertools
 import random
 import numpy as np
 import os
+import time
 
 def create_word_mapping_file(src_train_file,tgt_train_file,mapping_name,count_cutoff):
 	print "source file name used for creating mapping file:",src_train_file
@@ -50,7 +51,7 @@ class minibatcher:
 		self.load_mapping(mapping_file)
 		self.src_window = src_window
 		self.tgt_window = tgt_window
-		self.current_index = 0
+		self.current_index = 0	
 		self.minibatch_size = minibatch_size
 		print "src_window:",self.src_window
 		print "tgt_window:",self.tgt_window
@@ -63,7 +64,10 @@ class minibatcher:
 		while tmp_val <1:
 			self.val_checkpoints.append(int(tmp_val*self.data.shape[0]))
 			tmp_val+=val_check_rate
-		print "Number of times per epoch the validation set will be evaluated:",len(self.val_checkpoints)			
+		print "Number of times per epoch the validation set will be evaluated:",len(self.val_checkpoints)
+	def prep_train(self):
+		self.epoch_start_time = time.time()
+		self.current_index = 0	
 	def load_mapping(self,mapping_file):
 		source = True
 		self.src_mapping = {}
@@ -138,7 +142,9 @@ class minibatcher:
 		if self.current_index + self.minibatch_size > self.data.shape[0]:
 			#Now we need to wrap around the training set
 			print '-'*10,"Epoch",self.current_epoch,"just finished",'-'*10
+			print 'Epoch time (minutes)',(time.time() - self.epoch_start_time)/60.0
 			self.current_epoch+=1
+			self.epoch_start_time = time.time()
 			bottom_data = self.data[self.current_index:,:]
 			self.current_index = self.minibatch_size - (self.data.shape[0] - self.current_index)
 			top_data = self.data[:self.current_index]
