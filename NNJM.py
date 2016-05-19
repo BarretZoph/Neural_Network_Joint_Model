@@ -1,7 +1,4 @@
-
 # coding: utf-8
-
-# In[1]:
 
 #NNJM
 #TODO
@@ -12,65 +9,67 @@
 # Add in different loss function
 # Add in argparse
 # Save models
-
-
-# In[2]:
+# Scale gradients by minibatch size
 
 #Import statements
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 import tensorflow as tf
 import numpy as np
-import matplotlib.pyplot as plt
 import time
 import codecs
 import types
-get_ipython().magic(u'matplotlib inline')
+import sys
 
-
-# In[3]:
+#Process the data, get the source-vocab and target-vocab variables
+import data_loader
 
 #Parameters for the model
-params = {}
-params['minibatch'] = 64
-params['input-emb-size'] = 100
-params['output-emb-size'] = 100
-params['hiddenstate-size'] = 400
-params['source-vocab'] = None
-params['target-vocab'] = None
-params['datatype'] = tf.float32
-params['init-method'] = 'uniform'
-params['init-range'] = 0.01
-params['source-window'] = 11
-params['target-window'] = 4
-params['use-char'] = False
-params['seed'] = 1
-params['dropout-rate'] = 0.0 #probability of dropping a node
-params['loss'] = 'MLE' #('MLE','NCE','IS')
-params['learning-rate'] = 0.1
-params['decrease-factor'] = 0.8 #Multiply the learning rate by this if dev perplexity increases by more than epsilon
-params['epsilon-criteria'] = 0 #Epsilon in decrease-factor
-params['val-check-rate'] = 0.5 #every fraction of the training set get val perplexity
-params['epochs'] = 1000 #how many epochs to train for
-params['minibatches-per-epoch'] = None #Filled in by the data preprep
-params['source-train-file'] = 'train.source.lc'
-params['target-train-file'] = 'train.target.lc'
-params['mapping-file-name'] = 'mapping.nn'
-params['count-cutoff'] = 3
-params['training-data-file-name'] = 'training.data.11+4.smaller'
-params['val-data-file-name'] = 'training.data.11+4.smaller'#'validation.data.11+4'
-params['use-gpu'] = False
+par = {}
+par['minibatch'] = 64
+par['in-emb-size'] = 50
+par['out-emb-size'] = 256
+par['hs-size'] = 512
+par['src-voc'] = None
+par['tgt-voc'] = None
+par['dt'] = tf.float32
+par['src-win'] =11
+par['tgt-win'] = 4
+par['char'] = False
+par['dropout-rate'] = 0.1 #probability of dropping a node
+par['loss'] = 'MLE' #('MLE','NCE','IS')
+par['lr'] = 0.8 #learning rate
+par['NCE-samples'] = 100
+par['dec-fac'] = 0.75 #Multiply the learning rate by this if dev perplexity increases by more than epsilon
+par['ep-crit'] = 0 #Epsilon in decrease-factor
+par['val-check-rate'] = 0.5 #every fraction of the training set get val perplexity
+par['epochs'] = 100 #how many epochs to train for
+par['mb-per-ep'] = None #Filled in by the data preprep
+par['src-train-file'] = 'train.source.lc'
+par['tgt-train-file'] = 'train.target.lc'
+par['mapping-file-name'] = 'mapping.nn'
+par['count-cutoff'] = 3
+par['training-data-file-name'] = 'training.data.11+4'
+par['val-data-file-name'] = 'validation.data.11+4'
+par['gpu'] = True
 
 #Character model params
-char_params = {}
-char_params['num-highway-layers'] = 4
-char_params['char-emb-size'] = 25
-char_params['filter-width'] = 7
-char_params['longest-word'] = 30
+_char_params = {}
+_char_params['num-highway-layers'] = 4
+_char_params['char-emb-size'] = 25
+_char_params['filter-width'] = 7
+_char_params['longest-word'] = 30
 
+_init_params = {}
+_init_params['init-meth'] = 'uniform'
+_init_params['init-range'] = 0.01
+if _init_params['init-meth'] == 'uniform':
+    _init_params['di'] = tf.random_uniform_initializer(minval=-1*_init_params['init-range'], maxval=_init_params['init-range'],seed=None, dtype=par['dt'])
 
-params['char-params'] = char_params
+par['char-par'] = _char_params
+par['init-par'] = _init_params
 
-
-# In[4]:
 
 #Error checking for user inputs
 class NNJM_Error(Exception):
@@ -79,159 +78,158 @@ class NNJM_Error(Exception):
     def __str__(self):
         return repr(self.value)
 try:
-    if not params['val-check-rate']>0: raise NNJM_Error('val-check-rate')
-    if not params['val-check-rate']<=1: raise NNJM_Error('val-check-rate')
-    if not params['dropout-rate']>=0: raise NNJM_Error('dropout-rate')
-    if not params['dropout-rate']<=1: raise NNJM_Error('dropout-rate')
-    if not params['init-range']>0: raise NNJM_Error('init-range')
-    if not params['minibatch']>0: raise NNJM_Error('minibatch')
-    if not params['learning-rate']>=0: raise NNJM_Error('learning-rate')
-    if not type(params['use-gpu'])==types.BooleanType: raise NNJM_Error('use-gpu')
-    if not type(params['use-char'])==types.BooleanType: raise NNJM_Error('use-char')
-    if not params['loss'] in ['MLE','NCE','IS']: raise NNJM_Error('loss')
-except NNJM_Error as e:
-        print 'Bad user input was entered for:', e.value
-
-
-# In[5]:
+    if not par['val-check-rate']>0: raise NNJM_Error('val-check-rate')
+    if not par['val-check-rate']<=1: raise NNJM_Error('val-check-rate')
+    if not par['dropout-rate']>=0: raise NNJM_Error('dropout-rate')
+    if not par['dropout-rate']<=1: raise NNJM_Error('dropout-rate')
+    if not par['init-par']['init-range']>0: raise NNJM_Error('init-range')
+    if not par['minibatch']>0: raise NNJM_Error('minibatch')
+    if not par['lr']>=0: raise NNJM_Error('learning-rate')
+    if not type(par['gpu'])==types.BooleanType: raise NNJM_Error('gpu')
+    if not type(par['char'])==types.BooleanType: raise NNJM_Error('use-char')
+    if not par['loss'] in ['MLE','NCE','IS']: raise NNJM_Error('loss')
+except NNJM_Error:
+    print("Input Error",e.value)
 
 #Interactive session
-np.random.seed(seed=params['seed'])
-sess = tf.InteractiveSession()
-
-
-# In[6]:
+sess = tf.Session() 
 
 #Process the data, get the source-vocab and target-vocab variables
 import data_loader
 
-
-# In[7]:
-
 #create the mapping file
-data_loader.create_word_mapping_file(params['source-train-file'],params['target-train-file'],            params['mapping-file-name'],params['count-cutoff'])
-
-
-# In[8]:
+data_loader.create_word_mapping_file(par['src-train-file'],par['tgt-train-file'],par['mapping-file-name'],par['count-cutoff'])
 
 #Now load in the data
-data_factory = data_loader.minibatcher(params['mapping-file-name'],params['training-data-file-name'],                params['val-data-file-name'],params['source-window'],params['target-window'],                params['minibatch'],params['val-check-rate'])
-params['minibatches-per-epoch'] = data_factory.minibatches_per_epoch()
-params['source-vocab'] = data_factory.source_vocab_size
-params['target-vocab'] = data_factory.target_vocab_size
+data_factory = data_loader.minibatcher(par['mapping-file-name'],par['training-data-file-name'],par['val-data-file-name'],par['src-win'],par['tgt-win'],par['minibatch'],par['val-check-rate'])
+par['mb-per-epoch'] = data_factory.minibatches_per_epoch()
+par['src-voc'] = data_factory.source_vocab_size
+par['tgt-voc'] = data_factory.target_vocab_size
 
-
-# In[9]:
 
 #Place holders for input and output data, first index is the minibatch size
 
 #For the input the second dimension will be passed a
-#     vector of size minibatch x (params['source-window']+params['target-window'])
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    input_indices = tf.placeholder(tf.int64, shape=[None, params['source-window']+params['target-window']])
+#     vector of size minibatch x (par['src-win']+par['tgt-win'])
+with tf.device('/gpu:0' if par['gpu'] else '/cpu:0'):
+    input_indices = tf.placeholder(tf.int64, shape=[None, par['src-win']+par['tgt-win']],name='input_indices')
 
 #The output will be given a minibatch vector of correct indicies
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    correct_output = tf.placeholder(tf.int64,shape=[None])
+with tf.device('/gpu:0' if par['gpu'] else '/cpu:0'):
+    correct_output = tf.placeholder(tf.int64,shape=[None],name='correct_output')
 
 #For passing in the learning rate and dropout rate
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    learning_rate = tf.placeholder(params['datatype'],shape=[])
-    dropout_rate = tf.placeholder(params['datatype'],shape=[])
+with tf.device('/gpu:0' if par['gpu'] else '/cpu:0'):
+    learning_rate = tf.placeholder(par['dt'],shape=[],name='learning-rate')
+    dropout_rate = tf.placeholder(par['dt'],shape=[],name='dropout-rate')
 
-
-# In[10]:
-
-def param_init(params,shape=None,name=None,datatype=None):
-    if datatype == None:
-        datatype = params['datatype']
-    assert shape != None,"Error shape cannot be None in param_init"
-    if params['init-method'] == 'uniform':
-        return tf.random_uniform(shape, minval=-1*params['init-range'],maxval=params['init-range'],                    dtype=datatype, seed=params['seed'], name=name)
-    else:
-        print "ERROR this init-method has not been created yet"
-
-
-# In[11]:
+def _variable(name,shape,initializer,use_gpu):
+    assert shape != None,"Error shape cannot be None in _variable"
+    assert type(use_gpu)==types.BooleanType
+    with tf.device('/gpu:0' if use_gpu else '/cpu:0'):
+        var = tf.get_variable(name, shape, initializer=initializer)
+        return var
 
 #Parameters for the source and target embeddings
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    source_emb_matrix = tf.Variable(param_init(params,shape=[params['source-vocab'],params['input-emb-size']],name='src-emb'))
-    target_emb_matrix = tf.Variable(param_init(params,shape=[params['target-vocab'],params['input-emb-size']],name='tgt-emb'))
-
-
-# In[12]:
-
-#Do the one-hot emebedding lookups
-src_embed = tf.nn.embedding_lookup(source_emb_matrix, tf.slice(input_indices,[0,0],[-1,params['source-window']]))
-tgt_embed = tf.nn.embedding_lookup(target_emb_matrix, tf.slice(input_indices,[0,params['source-window']],                                                                [-1,params['target-window']]))
-
-
-# In[13]:
+with tf.variable_scope('input'):
+    source_emb_matrix = _variable('source-emb-matrix', [par['src-voc'], par['in-emb-size']],par['init-par']['di'],par['gpu'])
+    target_emb_matrix = _variable('target-emb-matrix',[par['tgt-voc'],par['in-emb-size']],par['init-par']['di'],par['gpu']) 
+#Emebedding lookups
+src_embed = tf.nn.embedding_lookup(source_emb_matrix, tf.slice(input_indices,[0,0],[-1,par['src-win']]))
+tgt_embed = tf.nn.embedding_lookup(target_emb_matrix, tf.slice(input_indices,[0,par['src-win']],[-1,par['tgt-win']]))
 
 #Now reshape to be able to feed through non-linearity
 concat_embed = tf.concat(1, [src_embed, tgt_embed])
-concat_embed = tf.reshape(concat_embed,[-1,params['input-emb-size']*(params['source-window']+params['target-window'])])
-concat_embed = tf.nn.dropout(concat_embed, 1-dropout_rate) #Pass in the keep prob
-
-
-# In[14]:
+concat_embed_reshape = tf.reshape(concat_embed,[-1,par['in-emb-size']*(par['src-win']+par['tgt-win'])])
+concat_embed_do = tf.nn.dropout(concat_embed_reshape, 1-dropout_rate) #Pass in the keep prob
 
 #First Layer
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    layer_1_weights = tf.Variable(param_init(params,        shape=[params['input-emb-size']*(params['source-window']+params['target-window']),params['hiddenstate-size']],name='lyr-1'))
-    layer_1_bias = tf.Variable(param_init(params,shape=[params['hiddenstate-size']],name='lyr-1-bias'))
-layer_1_output = tf.nn.relu(tf.matmul(concat_embed,layer_1_weights)+layer_1_bias)
-layer_1_output = tf.nn.dropout(layer_1_output, 1-dropout_rate) #Pass in the keep prob
-
-
-# In[15]:
+with tf.variable_scope('layer1'):
+    weights = _variable('weights',[par['in-emb-size']*(par['src-win']+par['tgt-win']),par['hs-size']],par['init-par']['di'],par['gpu'])
+    bias = _variable('bias',[par['hs-size']],par['init-par']['di'],par['gpu'])
+    output = tf.nn.relu(tf.matmul(concat_embed_do,weights)+bias)
+    layer1 = tf.nn.dropout(output, 1-dropout_rate) #Pass in the keep prob
 
 #Second layer
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    layer_2_weights = tf.Variable(param_init(params,shape=[params['hiddenstate-size'],params['output-emb-size']],                            name='lyr-2'))
-    layer_2_bias = tf.Variable(param_init(params,shape=[params['output-emb-size']],name='lyr-2-bias'))
-layer_2_output = tf.nn.relu(tf.matmul(layer_1_output,layer_2_weights)+layer_2_bias)
-layer_2_output = tf.nn.dropout(layer_2_output, 1-dropout_rate) #Pass in the keep prob
+with tf.variable_scope('layer2'):
+    weights = _variable('weights',[par['hs-size'],par['out-emb-size']],par['init-par']['di'],par['gpu'])
+    bias = _variable('bias',[par['out-emb-size']],par['init-par']['di'],par['gpu'])
+    output = tf.nn.relu(tf.matmul(layer1,weights)+bias)
+    layer2 = tf.nn.dropout(output, 1-dropout_rate) #Pass in the keep prob
 
-
-# In[16]:
 
 #Softmax layer
-with tf.device('/gpu:0' if params['use-gpu'] else '/cpu:0'):
-    softmax_weights = tf.Variable(param_init(params,shape=[params['output-emb-size'],params['target-vocab']],                                  name='softmax-weights')) 
-    softmax_bias = tf.Variable(param_init(params,shape=[params['target-vocab']],name='softmax-bias'))
-unscaled_final_output = tf.matmul(layer_2_output, softmax_weights) + softmax_bias
-loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(unscaled_final_output,correct_output))
-
-
-# In[17]:
+with tf.variable_scope('output'):
+    di = par['init-par']['di']
+    weights = _variable('weights',[par['out-emb-size'],par['tgt-voc']],di,par['gpu'])
+    bias = None
+    #Is using NCE initialize bias to -log(V)
+    if par['loss'] == 'NCE':
+        ci = tf.constant_initializer(value=-np.log(par['tgt-voc']), dtype=par['dt'])
+        bias = _variable('bias',[par['tgt-voc']],ci,par['gpu'])
+    else: 
+        bias = _variable('bias',[par['tgt-voc']],di,par['gpu'])
+	unscaled_final_output = tf.matmul(layer2, weights) + bias
+    loss = None
+    if par['loss'] == 'MLE':
+        loss = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(unscaled_final_output,correct_output))
+    elif par['loss'] == 'NCE':
+        loss = tf.reduce_mean(tf.nn.nce_loss(tf.transpose(weights), bias, unscaled_final_output, correct_output, par['num-NCE-samples'], par['tgt-voc']))
+    m_log_prob = tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(unscaled_final_output, correct_output)) #used for perp
 
 #Optimizer
-train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(loss)
-
-
-# In[18]:
+optim = tf.train.GradientDescentOptimizer(learning_rate)
+grads_and_vars = optim.compute_gradients(loss)
+scaled_grads_and_vars = [(tf.mul(gv[0],1.0/par['minibatch']),gv[1]) for gv in grads_and_vars]
+train_op = optim.apply_gradients(scaled_grads_and_vars)
 
 #Initiailize all the variables
 sess.run(tf.initialize_all_variables())
-
-
-# In[ ]:
 
 #Additional variables for tracking loss
 val_perplexities = [] #stores the validation perplexities each validation point
 
 
-# In[ ]:
+################# DEBUGGING ##################
 
-print "Training for",params['epochs'],"epochs (",params['epochs']*params['minibatches-per-epoch'],"minibatches)"
-print "All current parameters:"
-print params,'\n\n'
-print "-"*10,'beginning training','-'*10
+
+#print('source-emb-matrix:\n',source_emb_matrix.eval(session=sess),source_emb_matrix.get_shape()) 
+#print('target-emb-matrix:\n',target_emb_matrix.eval(session=sess),target_emb_matrix.get_shape()) 
+#data_factory.prep_train()
+#curr_minibatch,eval_val = data_factory.get_minibatch()
+#print('minibatch:\n',curr_minibatch)
+#input_train_batch = curr_minibatch[:,:par['src-win']+par['tgt-win']]
+#output_train_batch = np.squeeze(np.copy(curr_minibatch[:,par['src-win']+par['tgt-win']:]))
+#print('input minibatch:\n',input_train_batch)
+#print('output minibatch:\n',output_train_batch)
+#print('source slice:\n',tf.slice(input_indices,[0,0],[-1,par['src-win']]).eval(session=sess,feed_dict={input_indices:input_train_batch,
+#                correct_output:output_train_batch}))
+#print('target slice:\n',tf.slice(input_indices,[0,par['src-win']],[-1,par['tgt-win']]).eval(session=sess,feed_dict={input_indices:input_train_batch}))
+#
+#print('lookedup embeddings source:\n',src_embed.eval(session=sess,feed_dict={input_indices:input_train_batch}))
+#print('lookedup embeddings target:\n',tgt_embed.eval(session=sess,feed_dict={input_indices:input_train_batch}))
+#print('concat embed:\n',concat_embed.eval(session=sess,feed_dict={input_indices:input_train_batch}))
+#print('concat embed reshape:\n',concat_embed_reshape.eval(session=sess,feed_dict={input_indices:input_train_batch}))
+#print('concat embed do:\n',concat_embed_do.eval(session=sess,feed_dict={input_indices:input_train_batch,dropout_rate:0.1}))
+#print('unint minibatch:\n',data_factory.unint_batch(curr_minibatch))
+#sys.exit()
+##############################################
+
+
+#Do all the training
+print("Training for",par['epochs'],"epochs (",par['epochs']*par['mb-per-epoch'],"minibatches)")
+print("All current parameters:")
+print(par,'\n\n')
+print("All trainable variables in the model")
+print("-"*10,' All trainable variables in model (name,dtype,shape,device) ','-'*10)
+for var in tf.all_variables():
+    print(var.name,var.dtype,var.get_shape(),var.device)
+
+print("-"*10,'beginning training','-'*10)
+
 start_train = time.time()
 data_factory.prep_train() #prep the data loader for training, also stores timing info
-for i in range(params['epochs']*params['minibatches-per-epoch']):
+for i in range(par['epochs']*par['mb-per-epoch']):
     #get the minibatch
     curr_minibatch,eval_val = data_factory.get_minibatch()
     if eval_val:
@@ -239,34 +237,29 @@ for i in range(params['epochs']*params['minibatches-per-epoch']):
         log_sum = 0
         total_words = 0
         for val_batch in data_factory.get_val_data_gen():
-            #print val_batch[:,:params['source-window']+params['target-window']].shape
-            #print np.squeeze(val_batch[:,params['source-window']+params['target-window']:]).shape
-            input_val_batch = val_batch[:,:params['source-window']+params['target-window']]
-            output_val_batch = np.squeeze(np.copy(val_batch[:,params['source-window']+params['target-window']:]))
-            log_sum+=loss.eval(feed_dict={input_indices:input_val_batch,
+            #print val_batch[:,:par['src-win']+par['tgt-win']].shape
+            #print np.squeeze(val_batch[:,par['src-win']+par['tgt-win']:]).shape
+            input_val_batch = val_batch[:,:par['src-win']+par['tgt-win']]
+            output_val_batch = np.squeeze(np.copy(val_batch[:,par['src-win']+par['tgt-win']:]))
+            log_sum+=m_log_prob.eval(session=sess,feed_dict={input_indices:input_val_batch,
                         correct_output:output_val_batch, 
                         dropout_rate:0.0})
             total_words+=val_batch.shape[0]
         log_sum = (log_sum/np.log(2.0))/total_words
-        print "Perplexity on validation set:",2**log_sum
+        print("Perplexity on validation set:",2**log_sum)
         val_perplexities.append(2**log_sum)
-        if (len(val_perplexities) > 1) and (val_perplexities[-2] + params['epsilon-criteria'] < val_perplexities[-1]):
-            params['learning-rate']*=params['decrease-factor']
-            print 'Decreased learning rate to:',params['learning-rate']
+        if (len(val_perplexities) > 1) and (val_perplexities[-2] + par['ep-crit'] < val_perplexities[-1]):
+            par['lr']*=par['dec-fac']
+            print('Decreased learning rate to:',par['lr'])
         end_val = time.time()
-        print "Time for perplexity on dev set (minutes):",(end_val - start_val)/60.0
+        print("Time for perplexity on dev set (minutes):",(end_val - start_val)/60.0)
     #Now update the gradients for this training batch
-    input_train_batch = curr_minibatch[:,:params['source-window']+params['target-window']]
-    output_train_batch = np.squeeze(np.copy(curr_minibatch[:,params['source-window']+params['target-window']:]))
-    train_op.run(feed_dict={input_indices:input_train_batch,
+    input_train_batch = curr_minibatch[:,:par['src-win']+par['tgt-win']]
+    output_train_batch = np.squeeze(np.copy(curr_minibatch[:,par['src-win']+par['tgt-win']:]))
+    train_op.run(session=sess,feed_dict={input_indices:input_train_batch,
                 correct_output:output_train_batch,\
-                dropout_rate:params['dropout-rate'],learning_rate:params['learning-rate'] })
+                dropout_rate:par['dropout-rate'],learning_rate:par['lr'] })
 
 end_train = time.time()
-print "Time for total training (minutes):",(end_train - start_train)/60.0
-
-
-# In[ ]:
-
-
+print("Time for total training (minutes):",(end_train - start_train)/60.0)
 
