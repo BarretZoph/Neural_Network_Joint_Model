@@ -7,7 +7,7 @@ import numpy as np
 import os
 import time
 
-def create_word_mapping_file(src_train_file,tgt_train_file,mapping_name,count_cutoff):
+def create_word_mapping_file(src_train_file,tgt_train_file,mapping_name,count_cutoff,target_words=None):
     print "source file name used for creating mapping file:",src_train_file
     print "target file name used for creating mapping file:",tgt_train_file	
     src_train_file = codecs.open(src_train_file,'r','utf-8')
@@ -32,20 +32,29 @@ def create_word_mapping_file(src_train_file,tgt_train_file,mapping_name,count_cu
     for idx,word in enumerate(tgt_words):
     	tgt_vocab_mapping[idx] = word
     print 'source vocab size:',len(src_vocab_mapping)+3
-    print 'target vocab size:',len(tgt_vocab_mapping)+3
+    if target_words == None:
+        print 'target vocab size:',len(tgt_vocab_mapping)+3
     mapping_file = codecs.open(mapping_name,'w','utf-8')
     mapping_file.write(str(0)+'\t'+'<unk>\n')
     mapping_file.write(str(1)+'\t'+'<source_s>\n')
     mapping_file.write(str(2)+'\t'+'<\source_s>\n')
     for i in range(0,len(src_vocab_mapping)):
-    	mapping_file.write(str(i+3)+'\t'+src_vocab_mapping[i]+'\n')
+    	mapping_file.write(str(i+3)+'\t'+src_vocab_mapping[i]+'\n') 
     mapping_file.write('='*10+'\n')
-    mapping_file.write(str(0)+'\t'+'<unk>\n')
-    mapping_file.write(str(1)+'\t'+'<s>\n')
-    mapping_file.write(str(2)+'\t'+'<\s>\n')
-    for i in range(0,len(tgt_vocab_mapping)):
-    	mapping_file.write(str(i+3)+'\t'+tgt_vocab_mapping[i]+'\n')
-
+    if target_words == None:
+        mapping_file.write(str(0)+'\t'+'<unk>\n')
+        mapping_file.write(str(1)+'\t'+'<s>\n')
+        mapping_file.write(str(2)+'\t'+'<\s>\n')
+        for i in range(0,len(tgt_vocab_mapping)):
+    	    mapping_file.write(str(i+3)+'\t'+tgt_vocab_mapping[i]+'\n')
+    else:
+        wordlist = [x.replace('\n','').strip(' ') for x in codecs.open(target_words,'r','utf-8')]
+        assert wordlist[0]=='<unk>',"Wrong custom target word format"
+        assert wordlist[1]=='<s>',"Wrong custom target word format"
+        assert wordlist[2]=='</s>',"Wrong custom target word format"
+        print 'target vocab size:',len(wordlist)
+        for i in range(0,len(wordlist)):
+            mapping_file.write(str(i)+'\t'+wordlist[i]+'\n')
 class minibatcher:
     def __init__(self,mapping_file,data_file_name,val_file_name,src_window,tgt_window,minibatch_size,val_check_rate):
     	self.load_mapping(mapping_file)

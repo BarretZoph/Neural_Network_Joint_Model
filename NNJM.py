@@ -1,15 +1,14 @@
 # coding: utf-8
 
 #NNJM
+
 #TODO
-# Check to be sure slices are being done correctly
 # Convolution instead of first dense hidden layer
 # Put in character CNN
 # Put in bi-dir LSTm
 # Add in different loss function
 # Add in argparse
 # Save models
-# Scale gradients by minibatch size
 
 #Import statements
 from __future__ import absolute_import
@@ -37,11 +36,13 @@ par['dt'] = tf.float32
 par['src-win'] =11
 par['tgt-win'] = 4
 par['char'] = False
-par['dropout-rate'] = 0.1 #probability of dropping a node
+par['emb-dropout-rate'] = 0.1 #probability of dropping a node
+par['l1-dropout-rate'] = 0.1
+par['l2-dropout-rate'] = 0.4
 par['loss'] = 'MLE' #('MLE','NCE','IS')
 par['lr'] = 0.8 #learning rate
 par['NCE-samples'] = 100
-par['dec-fac'] = 0.75 #Multiply the learning rate by this if dev perplexity increases by more than epsilon
+par['dec-fac'] = 0.5 #Multiply the learning rate by this if dev perplexity increases by more than epsilon
 par['ep-crit'] = 0 #Epsilon in decrease-factor
 par['val-check-rate'] = 0.5 #every fraction of the training set get val perplexity
 par['epochs'] = 100 #how many epochs to train for
@@ -49,6 +50,7 @@ par['mb-per-ep'] = None #Filled in by the data preprep
 par['src-train-file'] = 'train.source.lc'
 par['tgt-train-file'] = 'train.target.lc'
 par['mapping-file-name'] = 'mapping.nn'
+par['custom-target-words'] = 'output.words' #This forces the input and output target words to use the words specified in this list
 par['count-cutoff'] = 3
 par['training-data-file-name'] = 'training.data.11+4'
 par['val-data-file-name'] = 'validation.data.11+4'
@@ -80,8 +82,12 @@ class NNJM_Error(Exception):
 try:
     if not par['val-check-rate']>0: raise NNJM_Error('val-check-rate')
     if not par['val-check-rate']<=1: raise NNJM_Error('val-check-rate')
-    if not par['dropout-rate']>=0: raise NNJM_Error('dropout-rate')
-    if not par['dropout-rate']<=1: raise NNJM_Error('dropout-rate')
+    if not par['emb-dropout-rate']>=0: raise NNJM_Error('dropout-rate')
+    if not par['emb-dropout-rate']<=1: raise NNJM_Error('dropout-rate')
+    if not par['l1-dropout-rate']>=0: raise NNJM_Error('dropout-rate')
+    if not par['l1-dropout-rate']>=0: raise NNJM_Error('dropout-rate')
+    if not par['l2-dropout-rate']<=1: raise NNJM_Error('dropout-rate')
+    if not par['l2-dropout-rate']<=1: raise NNJM_Error('dropout-rate')
     if not par['init-par']['init-range']>0: raise NNJM_Error('init-range')
     if not par['minibatch']>0: raise NNJM_Error('minibatch')
     if not par['lr']>=0: raise NNJM_Error('learning-rate')
@@ -98,7 +104,8 @@ sess = tf.Session()
 import data_loader
 
 #create the mapping file
-data_loader.create_word_mapping_file(par['src-train-file'],par['tgt-train-file'],par['mapping-file-name'],par['count-cutoff'])
+#print('*'*10,"WARNING A NEW MAPPING FILE IS NOT BEING CREATED, UNCOMMENT THE LINE IN THE CODE IF YOU WANT TO GENERATE NEW ONES",'*'*10)
+data_loader.create_word_mapping_file(par['src-train-file'],par['tgt-train-file'],par['mapping-file-name'],par['count-cutoff'],par['custom-target-words'])
 
 #Now load in the data
 data_factory = data_loader.minibatcher(par['mapping-file-name'],par['training-data-file-name'],par['val-data-file-name'],par['src-win'],par['tgt-win'],par['minibatch'],par['val-check-rate'])
@@ -121,7 +128,10 @@ with tf.device('/gpu:0' if par['gpu'] else '/cpu:0'):
 #For passing in the learning rate and dropout rate
 with tf.device('/gpu:0' if par['gpu'] else '/cpu:0'):
     learning_rate = tf.placeholder(par['dt'],shape=[],name='learning-rate')
-    dropout_rate = tf.placeholder(par['dt'],shape=[],name='dropout-rate')
+    emb_dropout_rate = tf.placeholder(par['dt'],shape=[],name='emb-dropout-rate')
+    l1_dropout_rate = tf.placeholder(par['dt'],shape=[],name='l1-dropout-rate')
+    l2_dropout_rate = tf.placeholder(par['dt'],shape=[],name='l2-dropout-rate')
+
 
 def _variable(name,shape,initializer,use_gpu):
     assert shape != None,"Error shape cannot be None in _variable"
@@ -141,21 +151,21 @@ tgt_embed = tf.nn.embedding_lookup(target_emb_matrix, tf.slice(input_indices,[0,
 #Now reshape to be able to feed through non-linearity
 concat_embed = tf.concat(1, [src_embed, tgt_embed])
 concat_embed_reshape = tf.reshape(concat_embed,[-1,par['in-emb-size']*(par['src-win']+par['tgt-win'])])
-concat_embed_do = tf.nn.dropout(concat_embed_reshape, 1-dropout_rate) #Pass in the keep prob
+concat_embed_do = tf.nn.dropout(concat_embed_reshape, 1-emb_dropout_rate) #Pass in the keep prob
 
 #First Layer
 with tf.variable_scope('layer1'):
     weights = _variable('weights',[par['in-emb-size']*(par['src-win']+par['tgt-win']),par['hs-size']],par['init-par']['di'],par['gpu'])
     bias = _variable('bias',[par['hs-size']],par['init-par']['di'],par['gpu'])
     output = tf.nn.relu(tf.matmul(concat_embed_do,weights)+bias)
-    layer1 = tf.nn.dropout(output, 1-dropout_rate) #Pass in the keep prob
+    layer1 = tf.nn.dropout(output, 1-l1_dropout_rate) #Pass in the keep prob
 
 #Second layer
 with tf.variable_scope('layer2'):
     weights = _variable('weights',[par['hs-size'],par['out-emb-size']],par['init-par']['di'],par['gpu'])
     bias = _variable('bias',[par['out-emb-size']],par['init-par']['di'],par['gpu'])
     output = tf.nn.relu(tf.matmul(layer1,weights)+bias)
-    layer2 = tf.nn.dropout(output, 1-dropout_rate) #Pass in the keep prob
+    layer2 = tf.nn.dropout(output, 1-l2_dropout_rate) #Pass in the keep prob
 
 
 #Softmax layer
@@ -243,7 +253,7 @@ for i in range(par['epochs']*par['mb-per-epoch']):
             output_val_batch = np.squeeze(np.copy(val_batch[:,par['src-win']+par['tgt-win']:]))
             log_sum+=m_log_prob.eval(session=sess,feed_dict={input_indices:input_val_batch,
                         correct_output:output_val_batch, 
-                        dropout_rate:0.0})
+                        l1_dropout_rate:0.0,l2_dropout_rate:0.0,emb_dropout_rate:0.0})
             total_words+=val_batch.shape[0]
         log_sum = (log_sum/np.log(2.0))/total_words
         print("Perplexity on validation set:",2**log_sum)
@@ -258,7 +268,10 @@ for i in range(par['epochs']*par['mb-per-epoch']):
     output_train_batch = np.squeeze(np.copy(curr_minibatch[:,par['src-win']+par['tgt-win']:]))
     train_op.run(session=sess,feed_dict={input_indices:input_train_batch,
                 correct_output:output_train_batch,\
-                dropout_rate:par['dropout-rate'],learning_rate:par['lr'] })
+                emb_dropout_rate:par['emb-dropout-rate'],
+                l1_dropout_rate:par['l1-dropout-rate'],
+                l2_dropout_rate:par['l2-dropout-rate'],
+                learning_rate:par['lr'] })
 
 end_train = time.time()
 print("Time for total training (minutes):",(end_train - start_train)/60.0)
